@@ -10,12 +10,12 @@ permissions:
 
 concurrency:
   group: store-download-403-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   ios:
     if: github.repository == 'pastnm/Asspp' && github.ref == 'refs/heads/fix/store-download-403'
-    runs-on: macos-26
+    runs-on: macos-26-intel
     timeout-minutes: 45
     steps:
       - name: Checkout exact fork commit
