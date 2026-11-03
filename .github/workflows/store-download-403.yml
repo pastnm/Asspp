@@ -17,8 +17,6 @@ jobs:
     if: github.repository == 'pastnm/Asspp' && github.ref == 'refs/heads/fix/store-download-403'
     runs-on: macos-26
     timeout-minutes: 45
-    env:
-      IPA_PATH: ${{ runner.temp }}/Asspp-403-fix.ipa
     steps:
       - name: Checkout exact fork commit
         uses: actions/checkout@v4
@@ -48,6 +46,7 @@ jobs:
           sudo xcode-select -s "$best_path"
           xcodebuild -version
           command -v xcbeautify >/dev/null || brew install xcbeautify
+          echo "IPA_PATH=${RUNNER_TEMP}/Asspp-403-fix.ipa" >> "$GITHUB_ENV"
 
       - name: Run download protocol and localization checks
         run: bash Resources/Scripts/check.downloads.sh
