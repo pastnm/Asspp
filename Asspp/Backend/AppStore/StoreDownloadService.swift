@@ -81,7 +81,7 @@ enum StoreDownloadService {
                 logger.info("Store download [\(trace)]: catalog version=\(metadata.externalVersionID)")
                 return metadata.externalVersionID
             } onFallback: { reason in
-                logger.info("Store download [\(trace)]: trying \(reason == "empty-redownload-http500" ? "update" : "redownload"), reason=\(reason)")
+                logger.info("Store download [\(trace)]: trying \(["empty-redownload-http500", "redownload-http403"].contains(reason) ? "update" : "redownload"), reason=\(reason)")
             }
             // Preserve the existing UI's explicit free-license acquisition flow.
             if StoreDownloadProtocol.failureCode(response) == "9610" {

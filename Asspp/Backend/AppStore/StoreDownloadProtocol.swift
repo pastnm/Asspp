@@ -157,8 +157,17 @@ enum StoreDownloadProtocol {
         guard !resolved.isEmpty else { throw StoreDownloadError.catalogUnavailable }
         do {
             return try await fetch(.redownload, resolved)
-        } catch StoreDownloadError.emptyResponse(500) {
-            onFallback("empty-redownload-http500")
+        } catch let error as StoreDownloadError {
+            let reason: String
+            switch error {
+            case .emptyResponse(500):
+                reason = "empty-redownload-http500"
+            case .emptyResponse(403), .response(403):
+                reason = "redownload-http403"
+            default:
+                throw error
+            }
+            onFallback(reason)
             return try await fetch(.update, resolved)
         }
     }

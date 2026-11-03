@@ -1,0 +1,131 @@
+name: Build 403 Fix IPA
+
+on:
+  push:
+    branches: [fix/store-download-403]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: store-download-403-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  ios:
+    if: github.repository == 'pastnm/Asspp' && github.ref == 'refs/heads/fix/store-download-403'
+    runs-on: macos-26
+    timeout-minutes: 45
+    env:
+      IPA_PATH: ${{ runner.temp }}/Asspp-403-fix.ipa
+    steps:
+      - name: Checkout exact fork commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Select newest stable Xcode
+        shell: bash
+        run: |
+          set -euo pipefail
+          best_path=""
+          best_ver=""
+          for app in /Applications/Xcode*.app; do
+            [ -d "$app" ] || continue
+            case "$(printf '%s' "$app" | tr '[:upper:]' '[:lower:]')" in
+              *beta*|*_rc*) continue ;;
+            esac
+            ver=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist" 2>/dev/null || true)
+            [ -n "$ver" ] || continue
+            if [ -z "$best_ver" ] || [ "$(printf '%s\n%s\n' "$best_ver" "$ver" | sort -V | tail -1)" = "$ver" ]; then
+              best_ver="$ver"
+              best_path="$app"
+            fi
+          done
+          [ -n "$best_path" ] || { echo '::error::No stable Xcode found'; exit 1; }
+          sudo xcode-select -s "$best_path"
+          xcodebuild -version
+          command -v xcbeautify >/dev/null || brew install xcbeautify
+
+      - name: Run download protocol and localization checks
+        run: bash Resources/Scripts/check.downloads.sh
+
+      - name: Build unsigned iOS IPA
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The existing script cleans its checkout; keep all outputs outside it.
+          zsh Resources/Scripts/compile.release.mobile.ci.sh "$GITHUB_WORKSPACE" "$IPA_PATH" 2>&1 | tee "${RUNNER_TEMP}/asspp-build.log"
+
+      - name: Verify archive, privacy and actual deployment target
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 Resources/Scripts/check.release.privacy.py "$IPA_PATH"
+          inspect="${RUNNER_TEMP}/asspp-inspect"
+          mkdir -p "${inspect:?}"
+          unzip -q "$IPA_PATH" -d "${inspect:?}"
+          app="${inspect}/Payload/Asspp.app"
+          executable=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app/Info.plist")
+          minimum=$(/usr/libexec/PlistBuddy -c 'Print :MinimumOSVersion' "$app/Info.plist")
+          test "$minimum" = '17.0'
+          xcrun vtool -show-build "$app/$executable" | tee "${RUNNER_TEMP}/MachO-build.txt"
+          grep -Eq 'minos[[:space:]]+17\.0([[:space:]]|$)' "${RUNNER_TEMP}/MachO-build.txt"
+          test ! -f "$app/embedded.mobileprovision"
+          codesign -dv --verbose=4 "$app" >"${RUNNER_TEMP}/signature.txt" 2>&1 || true
+          cd "${RUNNER_TEMP:?}"
+          shasum -a 256 Asspp-403-fix.ipa > SHA256SUMS
+          {
+            echo '# Asspp 4.2.2 — HTTP 403 fallback'
+            echo
+            echo "Source: ${GITHUB_REPOSITORY}, branch ${GITHUB_REF_NAME}, commit ${GITHUB_SHA}."
+            echo
+            echo 'Includes one version-pinned update fallback after redownload HTTP 403; both 403 regression cases and localization checks passed.'
+            echo 'This does not guarantee that Apple accepts the fallback request.'
+            echo
+            echo "Minimum iOS: ${minimum}. Verified in Info.plist and the main Mach-O build command. This build is NOT an iOS 16 compatibility build."
+            echo 'Signing: unsigned / no Apple developer provisioning profile; requires a suitable signing/install method on a compatible device.'
+            echo
+            echo "Workflow: https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+            echo
+            cat SHA256SUMS
+          } > release-notes.md
+          cat release-notes.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload verified build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Asspp-403-fix-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/Asspp-403-fix.ipa
+            ${{ runner.temp }}/SHA256SUMS
+            ${{ runner.temp }}/MachO-build.txt
+            ${{ runner.temp }}/signature.txt
+            ${{ runner.temp }}/release-notes.md
+          if-no-files-found: error
+
+      - name: Publish unique prerelease from this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="403-fix-${GITHUB_SHA:0:12}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          gh release create "$tag" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "Asspp 4.2.2 HTTP 403 fix (iOS 17+)" \
+            --notes-file "${RUNNER_TEMP}/release-notes.md" \
+            --prerelease \
+            "${IPA_PATH}" "${RUNNER_TEMP}/SHA256SUMS" \
+            "${RUNNER_TEMP}/MachO-build.txt" "${RUNNER_TEMP}/signature.txt"
+
+      - name: Preserve build diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Asspp-403-build-log-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/asspp-build.log
+          if-no-files-found: ignore

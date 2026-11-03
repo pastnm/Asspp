@@ -3,8 +3,9 @@
 `StoreDownloadService` uses `volumeStoreDownloadProduct` first. It tries the
 redownload endpoint once for failure 5002, or a missing/empty songList with no
 failure code, customer message, account dialog or action. If the pinned redownload
-returns an empty HTTP 500, it tries the bag-advertised `updateProduct` endpoint once,
-retaining the same account and version. Other rejections and transport errors are
+returns an empty HTTP 500 or a redownload HTTP 403, it tries the bag-advertised
+`updateProduct` endpoint once, retaining the same account and version. Other
+rejections and transport errors are
 surfaced without this fallback. Numeric failure codes and
 `metrics.messageCode` are recognized, and Apple's customer messages are preserved
 in the error UI. License-required responses still use the explicit acquisition UI.
