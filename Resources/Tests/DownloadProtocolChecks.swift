@@ -43,21 +43,24 @@ struct DownloadProtocolChecks {
         // HTTP 403 from redownload also tries the bag-advertised update endpoint once.
         for failure in [StoreDownloadError.emptyResponse(403), .response(403)] {
             requests = []
+            var reasons: [String] = []
             let recovered = try await StoreDownloadProtocol.fetchWithFallback(version: "12345") { endpoint, version in
                 requests.append((endpoint, version))
                 if endpoint == .volumeStore { return empty }
                 if endpoint == .redownload { throw failure }
                 return success
             } resolveVersion: { fatalError("Replaced the requested historical version") } onFallback: { reason in
-                precondition(reason == "redownload-http403")
+                reasons.append(reason)
             }
             _ = try StoreDownloadProtocol.packageItem(recovered, bundleID: "example.app")
+            precondition(reasons == ["empty-songList", "redownload-http403"])
             precondition(requests.map(\.0) == [.volumeStore, .redownload, .update])
             precondition(requests.allSatisfy { $0.1 == "12345" })
         }
 
         // Other failures do not qualify, and a failed update never loops.
-        for failure in [StoreDownloadError.response(500), .emptyResponse(503), .emptyResponse(500)] {
+        for failure in [StoreDownloadError.response(500), .emptyResponse(503), .emptyResponse(500),
+                        .emptyResponse(403), .response(403)] {
             requests = []
             do {
                 _ = try await StoreDownloadProtocol.fetchWithFallback(version: "12345") { endpoint, version in
@@ -69,9 +72,10 @@ struct DownloadProtocolChecks {
                 } resolveVersion: { fatalError("Unexpected lookup") } onFallback: { _ in }
                 fatalError("Ignored a failed download response")
             } catch {
-                if case StoreDownloadError.emptyResponse(500) = failure {
+                switch failure {
+                case .emptyResponse(500), .emptyResponse(403), .response(403):
                     precondition(requests.count == 3 && requests.last?.0 == .update)
-                } else {
+                default:
                     precondition(requests.count == 2)
                 }
             }

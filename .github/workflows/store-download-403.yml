@@ -49,7 +49,10 @@ jobs:
           echo "IPA_PATH=${RUNNER_TEMP}/Asspp-403-fix.ipa" >> "$GITHUB_ENV"
 
       - name: Run download protocol and localization checks
-        run: bash Resources/Scripts/check.downloads.sh
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash Resources/Scripts/check.downloads.sh 2>&1 | tee "${RUNNER_TEMP}/asspp-tests.log"
 
       - name: Build unsigned iOS IPA
         shell: bash
@@ -121,10 +124,25 @@ jobs:
             "${IPA_PATH}" "${RUNNER_TEMP}/SHA256SUMS" \
             "${RUNNER_TEMP}/MachO-build.txt" "${RUNNER_TEMP}/signature.txt"
 
+      - name: Expose failure diagnostics
+        if: failure()
+        shell: bash
+        run: |
+          for log in "${RUNNER_TEMP}/asspp-tests.log" "${RUNNER_TEMP}/asspp-build.log"; do
+            [ -f "$log" ] || continue
+            { grep -iE 'error:|precondition failed|fatal error|failed' "$log" | tail -15 || true; } |
+              while IFS= read -r line; do
+                line="${line//'%'/'%25'}"
+                printf '::error title=CI diagnostic::%s\n' "$line"
+              done
+          done
+
       - name: Preserve build diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: Asspp-403-build-log-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/asspp-build.log
+          path: |
+            ${{ runner.temp }}/asspp-build.log
+            ${{ runner.temp }}/asspp-tests.log
           if-no-files-found: ignore
